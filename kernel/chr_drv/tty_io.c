@@ -63,10 +63,10 @@ struct tty_struct tty_table[] = {
 		{0,0,0,0,""},		/* console write-queue */
 		{0,0,0,0,""}		/* console secondary queue */
 	},{
-		{0, /* no translation */
-		0,  /* no translation */
+		{ICRNL, /* no translation */
+		OPOST|ONLCR,  /* no translation */
 		B2400 | CS8,
-		0,
+		ISIG | ICANON | ECHO | ECHOCTL | ECHOKE,
 		0,
 		INIT_C_CC},
 		0,
