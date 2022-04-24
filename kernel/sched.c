@@ -56,7 +56,7 @@ union task_union {
 };
 
 static union task_union init_task = {INIT_TASK,};
-
+struct tss_struct *tss = &(init_task.task.tss);
 long volatile jiffies=0;
 long startup_time=0;
 struct task_struct *current = &(init_task.task);
@@ -101,9 +101,12 @@ void math_state_restore()
  * tasks can run. It can not be killed, and it cannot sleep. The 'state'
  * information in task[0] is never used.
  */
+
+extern void switch_to_by_stack(long, long);
 void schedule(void)
 {
 	int i,next,c;
+	struct task_struct *pnext = &(init_task.task);
 	struct task_struct ** p;
 
 /* check alarm, wake up any interruptible tasks that have got a signal */
@@ -119,18 +122,20 @@ void schedule(void)
 				(*p)->state=TASK_RUNNING;
 		}
 
-/* this is the scheduler proper: */
+	/* this is the scheduler proper: */
 
 	while (1) {
 		c = -1;
 		next = 0;
+		pnext = task[next];
+		
 		i = NR_TASKS;
 		p = &task[NR_TASKS];
 		while (--i) {
 			if (!*--p)
 				continue;
 			if ((*p)->state == TASK_RUNNING && (*p)->counter > c)
-				c = (*p)->counter, next = i;
+				c = (*p)->counter, pnext = *p, next = i; 
 		}
 		if (c) break;
 		for(p = &LAST_TASK ; p > &FIRST_TASK ; --p)
@@ -138,7 +143,11 @@ void schedule(void)
 				(*p)->counter = ((*p)->counter >> 1) +
 						(*p)->priority;
 	}
+#ifndef CONFIG_TASK_TSS
+	switch_to_by_stack((long)pnext, (long)(_LDT(next)));
+#else
 	switch_to(next);
+#endif
 }
 
 int sys_pause(void)
@@ -312,11 +321,17 @@ void do_timer(long cpl)
 		if (!--beepcount)
 			sysbeepstop();
 
+	/*
+	 * 增加内核时间或用户时间计数
+	 */
 	if (cpl)
 		current->utime++;
 	else
 		current->stime++;
 
+	/*
+	 * 如果有定时器存在则处理定制器相关
+	 */
 	if (next_timer) {
 		next_timer->jiffies--;
 		while (next_timer && next_timer->jiffies <= 0) {
@@ -382,32 +397,83 @@ int sys_nice(long increment)
 		current->priority -= increment;
 	return 0;
 }
-
+/*******************************************************************************
+	gdt:	
+    .quad 0x0000000000000000	NULL descriptor
+	.quad 0x00c09a0000000fff	16Mb
+	.quad 0x00c0920000000fff	16Mb
+	.quad 0x0000000000000000	TEMPORARY - don't use
+	.fill 252,8,0			    space for LDT's and TSS's etc
+	上面的表为当前系统的全局描述符表，从head.s拷贝而来
+	FIRST_TSS_ENTRY，定义为4,
+	FIRST_LDT_ENTRY，定义为FIRST_TSS_ENTRY =  5，
+	我们由此可以知道init_task占用了2个描述符
+*******************************************************************************/
 void sched_init(void)
 {
 	int i;
 	struct desc_struct * p;
-
+	
 	if (sizeof(struct sigaction) != 16)
 		panic("Struct sigaction MUST be 16 bytes");
-	set_tss_desc(gdt+FIRST_TSS_ENTRY,&(init_task.task.tss));
-	set_ldt_desc(gdt+FIRST_LDT_ENTRY,&(init_task.task.ldt));
+	set_tss_desc(gdt+FIRST_TSS_ENTRY, &(init_task.task.tss));
+	set_ldt_desc(gdt+FIRST_LDT_ENTRY, &(init_task.task.ldt));
+
+	printk("init_task use GTD %d for TSS\n", FIRST_TSS_ENTRY);
+	printk("init_task use GTD %d for LDT\n", FIRST_LDT_ENTRY);
+	
+/*******************************************************************************
+	此时p为gdt的第6项，也就是说从第六项开始清理gdt为0，每次清理两项
+	p = gdt + 2 + FIRST_TSS_ENTRY
+	2表示本进程要使用的2个描述符
+	FIRST_TSS_ENTRY定义为4表
+	上述的意思是从第6项情理全局描述符，共清理NR_TASKS(64)个进程所需要的128个全局描述符和task数组
+	64个进程包含了init_task进程，如下
+	struct task_struct * task[NR_TASKS] = {&(init_task.task), };
+	我们知道init_task占用了task[0]
+*******************************************************************************/
+
 	p = gdt+2+FIRST_TSS_ENTRY;
-	for(i=1;i<NR_TASKS;i++) {
+	for(i=1; i<NR_TASKS; i++) {
 		task[i] = NULL;
-		p->a=p->b=0;
+		p->a = p->b=0;
 		p++;
-		p->a=p->b=0;
+		p->a = p->b=0;
 		p++;
+		
 	}
-/* Clear NT, so that we won't have troubles with that later on */
+/*******************************************************************************
+	如下代码
+	Clear NT, so that we won't have troubles with that later on 
+	防止任务嵌套和iret时发生任务切换，清NT(bit16)和RF(bit14)位
+	pushfl指令是push flags long的缩写，意思是将标志寄存器压栈
+	popfl是将标志寄存器出栈
+	NT用于控制iret的执行具体如下
+	NT = 0 时，用堆栈中保存的值恢复EFlag、CS(代码段寄存器)和EIP(32位指令指针寄存器)，执行常规的中断返回操作；
+	NT = 1 时, 通过任务转换实现中断返回。
+*******************************************************************************/
 	__asm__("pushfl ; andl $0xffffbfff,(%esp) ; popfl");
+/*******************************************************************************
+	加载LDT和TSS段，参数为pid，此处加载初始进程的LDT和TSS
+	ltr lldt 加载LDT,TSS段到相应的寄存器
+*******************************************************************************/
+	printk("Load TSS\n");
 	ltr(0);
+	printk("Load LDT\n");
 	lldt(0);
-	outb_p(0x36,0x43);		/* binary, mode 3, LSB/MSB, ch 0 */
-	outb_p(LATCH & 0xff , 0x40);	/* LSB */
-	outb(LATCH >> 8 , 0x40);	/* MSB */
+/*******************************************************************************
+	outb_p(0x36,0x43);						
+	outb_p(LATCH & 0xff , 0x40);			
+	outb(LATCH >> 8 , 0x40);				
+	定时器操作，知道就行
+*******************************************************************************/
+	outb_p(0x36,0x43);						/* binary, mode 3, LSB/MSB, ch 0 */
+	outb_p(LATCH & 0xff , 0x40);			/* LSB */
+	outb(LATCH >> 8 , 0x40);				/* MSB */
+	printk("Enable timer_interrupt\n");
 	set_intr_gate(0x20,&timer_interrupt);
 	outb(inb_p(0x21)&~0x01,0x21);
+	printk("Enable system_call\n");
 	set_system_gate(0x80,&system_call);
 }
+

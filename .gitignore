@@ -1,4 +1,5 @@
 *.log
+*.elf
 *.bak
 .DS_Store
 *.o
@@ -18,4 +19,4 @@ setup
 kernel.bin
 kernel.sym
 kernel.map
-rootfs/
+*.img

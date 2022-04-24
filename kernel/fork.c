@@ -42,12 +42,26 @@ int copy_mem(int nr,struct task_struct * p)
 	unsigned long old_data_base,new_data_base,data_limit;
 	unsigned long old_code_base,new_code_base,code_limit;
 
-	code_limit=get_limit(0x0f);
+	/*
+	 * 读取系统当前的局部描述符的代码段长度和数据段长度
+	 */
+	code_limit=get_limit(0x0f);	
 	data_limit=get_limit(0x17);
+
+	/*
+	 * 读取当前进程的局部描述符的代码段长度和数据段长度
+	 */
 	old_code_base = get_base(current->ldt[1]);
 	old_data_base = get_base(current->ldt[2]);
+	/*
+	 * 我们知道代码段和数据段的基地址是一样的
+	 *
+	 */
 	if (old_data_base != old_code_base)
 		panic("We don't support separate I&D");
+	/*
+	 * 如果数据段的长度小于代码段的长度也不行
+	 */
 	if (data_limit < code_limit)
 		panic("Bad data_limit");
 	new_data_base = new_code_base = nr * 0x4000000;
@@ -62,6 +76,8 @@ int copy_mem(int nr,struct task_struct * p)
 	return 0;
 }
 
+extern void first_return_from_kernel(void);
+
 /*
  *  Ok, this is the main fork-routine. It copies the system process
  * information (task[nr]) and sets up the necessary registers. It
@@ -75,14 +91,21 @@ int copy_process(int nr,long ebp,long edi,long esi,long gs,long none,
 	struct task_struct *p;
 	int i;
 	struct file *f;
+#ifndef CONFIG_TASK_TSS 
+	long *stack_top = NULL;
+#endif
 
 	p = (struct task_struct *) get_free_page();
 	if (!p)
 		return -EAGAIN;
 	task[nr] = p;
-	
+
 	// NOTE!: the following statement now work with gcc 4.3.2 now, and you
 	// must compile _THIS_ memcpy without no -O of gcc.#ifndef GCC4_3
+	/* 如果使用了 memcpy 函数，因为task_struct是个联合体会拷贝堆栈数据
+	 * 此处的语法不会拷贝堆栈数据
+	 *
+	 */
 	*p = *current;	/* NOTE! this doesn't copy the supervisor stack */
 	p->state = TASK_UNINTERRUPTIBLE;
 	p->pid = last_pid;
@@ -94,12 +117,40 @@ int copy_process(int nr,long ebp,long edi,long esi,long gs,long none,
 	p->utime = p->stime = 0;
 	p->cutime = p->cstime = 0;
 	p->start_time = jiffies;
+
+
+#ifndef CONFIG_TASK_TSS
+	stack_top = (long *)(PAGE_SIZE + (long)p);
+
+	*(--stack_top) = ss & 0xffff;
+	*(--stack_top) = esp;
+	*(--stack_top) = eflags;
+	*(--stack_top) = cs & 0xffff;
+	*(--stack_top) = eip;
+
+	*(--stack_top) = ds & 0xffff; 
+	*(--stack_top) = es & 0xffff; 
+	*(--stack_top) = fs & 0xffff; 
+	*(--stack_top) = gs & 0xffff;
+	*(--stack_top) = esi; 
+	*(--stack_top) = edi; 
+	*(--stack_top) = edx;
+	*(--stack_top) = (long)first_return_from_kernel;
+	*(--stack_top) = ebp;
+	*(--stack_top) = ecx;
+	*(--stack_top) = ebx;
+	*(--stack_top) = 0;
+	
+	p->stack_top = (long)stack_top;
+	
+#else
+
 	p->tss.back_link = 0;
 	p->tss.esp0 = PAGE_SIZE + (long) p;
 	p->tss.ss0 = 0x10;
 	p->tss.eip = eip;
 	p->tss.eflags = eflags;
-	p->tss.eax = 0;
+	p->tss.eax = 0;			/*为什么进程返回0的原因*/
 	p->tss.ecx = ecx;
 	p->tss.edx = edx;
 	p->tss.ebx = ebx;
@@ -115,6 +166,9 @@ int copy_process(int nr,long ebp,long edi,long esi,long gs,long none,
 	p->tss.gs = gs & 0xffff;
 	p->tss.ldt = _LDT(nr);
 	p->tss.trace_bitmap = 0x80000000;
+	
+#endif
+
 	if (last_task_used_math == current)
 		__asm__("clts ; fnsave %0"::"m" (p->tss.i387));
 	if (copy_mem(nr,p)) {
@@ -141,12 +195,27 @@ int find_empty_process(void)
 {
 	int i;
 
-	repeat:
-		if ((++last_pid)<0) last_pid=1;
-		for(i=0 ; i<NR_TASKS ; i++)
-			if (task[i] && task[i]->pid == last_pid) goto repeat;
-	for(i=1 ; i<NR_TASKS ; i++)
+repeat:
+	/* 如果last_pid满了，则从重新开始编号
+	 *
+	 */
+	if ((++last_pid) < 0) 
+		last_pid=1;
+
+	/* 查找last_pid是否已经被占用，如果是则++last_pid继续尝试
+	 *
+	 */
+	for(i=0; i<NR_TASKS; i++)
+		if (task[i] && task[i]->pid == last_pid) 
+			goto repeat;
+
+	/* 在task数组中寻找一个空的task并返回其数组下标
+	 *
+	 */
+	for(i=1; i<NR_TASKS; i++)
 		if (!task[i])
 			return i;
+			
 	return -EAGAIN;
 }
+

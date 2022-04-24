@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <time.h>
 
+
 /*
  * we need this inline - forking from kernel space will result
  * in NO COPY ON WRITE (!!!), until an execve is executed. This
@@ -26,6 +27,7 @@ static inline _syscall0(int,fork)
 static inline _syscall0(int,pause)
 static inline _syscall1(int,setup,void *,BIOS)
 static inline _syscall0(int,sync)
+static inline _syscall0(int,getpid)
 
 #include <linux/tty.h>
 #include <linux/sched.h>
@@ -50,6 +52,7 @@ extern void chr_dev_init(void);
 extern void hd_init(void);
 extern void floppy_init(void);
 extern void mem_init(long start, long end);
+extern long get_total_pages(void);
 extern long rd_init(long mem_start, int length);
 extern long kernel_mktime(struct tm * tm);
 extern long startup_time;
@@ -101,15 +104,32 @@ static long memory_end = 0;
 static long buffer_memory_end = 0;
 static long main_memory_start = 0;
 
+extern int printk(const char * fmt, ...);
+
 struct drive_info { char dummy[32]; } drive_info;
 
-void main(void)		/* This really IS void, no error here. */
+void main(int __a, int __b, int __c)		/* This really IS void, no error here. */
 {			/* The startup routine assumes (well, ...) this */
 /*
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
  */
 
+/*******************************************************************************
+	ORIG_ROOT_DEV为0x901FC，由于在前面的程序中回见bootsect程序拷贝到0x90000处，
+	bootsect的508地址存放的时根设备的编号301，0x1fc=508，所有此处存放的是根设备
+	的设备号;
+	DRIVE_INFO存放的是第一个硬盘信息
+	EXT_MEM_K系统从1MB开始的扩展内存数值(KB)，复习一下实模式下最多访问1MB空间
+	memory_end & 0xffff000进行内存对齐，我们看到后面有3个0，一共12位，因此我们
+	知道内核要求页对齐即4KB对其
+
+	我们根据代码看到如果硬盘大于16MB，则内存为16MB,
+	如果内存大于12MB, buffer_memory_end为4MB
+	如果内存大于6MB，buffer_memory_end为2MB
+	否则buffer_memory_end为1M
+	memory_end最多16MB
+*******************************************************************************/
  	ROOT_DEV = ORIG_ROOT_DEV;
  	drive_info = DRIVE_INFO;
 	memory_end = (1<<20) + (EXT_MEM_K<<10);
@@ -126,11 +146,22 @@ void main(void)		/* This really IS void, no error here. */
 #ifdef RAMDISK_SIZE
 	main_memory_start += rd_init(main_memory_start, RAMDISK_SIZE*1024);
 #endif
+/*******************************************************************************
+	创建mem_map数组，并将main_memory_start到memory_end之间的内存
+	以4KB为一组，进行创建
+*******************************************************************************/
 	mem_init(main_memory_start,memory_end);
 	trap_init();
 	blk_dev_init();
 	chr_dev_init();
 	tty_init();
+	printk("params a %d b %d c %d\n", __a, __b, __c);
+	printk("mem_start is %dMB\n", main_memory_start/(1024*1024));
+	printk("men_end is %dMB\n", memory_end/(1024*1024));
+	printk("system has %d pages omg\n", get_total_pages());
+#ifdef RAMDISK_SIZE
+	printk("ramdisk size is %dMB", RAMDISK_SIZE/1024);
+#endif
 	printk("kernel time init\n");
 	time_init();
 	printk("kernel sched init\n");
@@ -142,8 +173,62 @@ void main(void)		/* This really IS void, no error here. */
 	printk("kernel fp init\n");
 	floppy_init();
 	printk("kernel move to user\n");
+	/*
+	 * sti允许中断
+	 *
+	 */	
 	sti();
+	/*
+	 执行完move_to_user_mode函数后，程序会手工切到task0执行，测代码段和数据段
+	 和内核一致，堆栈也使用了内核堆栈，运行权限变成3, 因此我们可以看出Linux中
+	 使用0和3权限
+	 具体可以查看move_to_user_mode分析
+ 	*/
 	move_to_user_mode();
+
+	/*	
+     fork程序是一个系统调用，使用_syscall0进程展开生成，0表示没有参数
+     
+     #define _syscall0(type,name) \
+     	type name(void) \
+     	{ \
+     	long __res; \
+     	__asm__ volatile ("int $0x80" \
+     	 : "=a" (__res) \
+     	 : "0" (__NR_##name)); \
+     	if (__res >= 0) \
+     	 return (type) __res; \
+     	errno = -__res; \
+     	return -1; \
+     
+     根据前面的定义static inline _syscall0(int,fork) 展开
+     
+     int fork() {
+     	register eax __ret;
+     	eax= __NR_fork;
+     	int 0x80
+     	if (eax >= 0)
+     		return int __res;
+     	error = - __res
+     	return -1
+     }
+     INT 0x80是软中断函数，其调用流程为:
+     CPU通过中断向量0x80找到对应的描述符，此描述符包含了段选择子和偏移地址已经DPL
+     CPU检查当前的DPL是否小于描述符的DPL
+     CPU会从当前TSS段中找到中断处理程序的栈选择子和栈指针作为新的栈地址(tss.ss0, tss.esp0)
+     如果DPL发生变化则将当前的SS, ESP, EFLAGS, CS, EIP压入新的栈中
+     如果DPL没有发生变化则将EFLAGS, CS, EIP压如新的栈中
+     CPU从中断描述符中取CS:EIP作为新的运行地址
+     
+     fork执行完毕后是进程1，此时进程0和进程1使用相同的用户空间栈，
+     为了进程之间互不影响因此
+     暂时不使用栈，函数以内联的形式进行调用，试想一下
+     如果以函数调用的形成当fork时发生切换，系统将当前的SS, SP压栈，
+     此时pause进程也将SS, SP压栈
+     pause的堆栈数据会覆盖fork的堆栈数据，使fork函数返回到pause函数这里，
+     从而init不能执行
+     同理，也可能导致pause进程执行到init程序里
+	*/
 	if (!fork()) {		/* we count on this going ok */
 		init();
 	}
@@ -182,10 +267,13 @@ void init(void)
 	(void) open("/dev/tty0",O_RDWR,0);
 	(void) dup(0);
 	(void) dup(0);
+	printf("init current pid is %d\n", getpid());
 	printf("%d buffers = %d bytes buffer space\n\r",NR_BUFFERS,
 		NR_BUFFERS*BLOCK_SIZE);
 	printf("Free mem: %d bytes\n\r",memory_end-main_memory_start);
+
 	if (!(pid=fork())) {
+		printf("init fork current pid is %d\n", getpid());
 		close(0);
 		if (open("/etc/rc",O_RDONLY,0))
 			_exit(1);
@@ -194,13 +282,17 @@ void init(void)
 	}
 	if (pid>0)
 		while (pid != wait(&i))
+
 			/* nothing */;
 	while (1) {
+		printf("start enter init while(1)\n");
 		if ((pid=fork())<0) {
+			printf("init while(1) pid is %d\n", getpid());
 			printf("Fork failed in init\r\n");
 			continue;
 		}
 		if (!pid) {
+			printf("while1 fork current pid is %d\n", getpid());
 			close(0);close(1);close(2);
 			setsid();
 			(void) open("/dev/tty0",O_RDWR,0);
