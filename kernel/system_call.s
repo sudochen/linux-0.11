@@ -151,9 +151,17 @@ coprocessor_error:
 switch_to_by_stack:
     pushl %ebp
     movl %esp,%ebp
+    pushl %edx
     pushl %ecx
     pushl %ebx
     pushl %eax
+    pushl %edi
+	pushl %esi
+	pushfl
+	push %gs
+	push %fs
+	push %es
+	push %ds
     movl 8(%ebp),%ebx
     cmpl %ebx,current
     je 1f
@@ -177,22 +185,23 @@ switch_to_by_stack:
     cmpl %eax,last_task_used_math 
     jne 1f
     clts
-1:    
-    popl %eax
-    popl %ebx
+1: 
+	pop %ds
+	pop %es
+	pop %fs
+	pop %gs
+	popfl
+	popl %esi
+	popl %edi
+	popl %eax
+	popl %ebx   
     popl %ecx
+	popl %edx
     popl %ebp
     ret
 
 .align 2
 first_return_from_kernel: 
-    popl %edx
-    popl %edi
-    popl %esi
-    pop %gs
-    pop %fs
-    pop %es
-    pop %ds
     iret
 
 .align 2

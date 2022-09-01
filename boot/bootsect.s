@@ -67,12 +67,12 @@
 	begbss:
 	.text
 
-	.equ SETUPLEN, 4				# nr of setup-sectors
-	.equ BOOTSEG, 0x07c0			# original address of boot-sector
-	.equ INITSEG, 0x9000			# we move boot here - out of the way
-	.equ SETUPSEG, 0x9020			# setup starts here
-	.equ SYSSEG, 0x1000				# system loaded at 0x10000 (65536).
-	.equ ENDSEG, SYSSEG + SYSSIZE	# where to stop loading
+	.equ SETUPLEN, 	4					# nr of setup-sectors
+	.equ BOOTSEG, 	0x07c0				# original address of boot-sector
+	.equ INITSEG, 	0x9000				# we move boot here - out of the way
+	.equ SETUPSEG, 	0x9020				# setup starts here
+	.equ SYSSEG, 	0x1000				# system loaded at 0x10000 (65536).
+	.equ ENDSEG, 	SYSSEG + SYSSIZE	# where to stop loading
 
 # ROOT_DEV:	0x000 - same type of floppy as boot.
 #		0x301 - first partition on first drive etc
@@ -88,12 +88,13 @@
 # 系统启动后，BIOS会将启动设备的前512字节拷贝至0x7c00处并运行
 # 在编译bootsect模块中，我们发现了链接参数-Ttext 0 -e _start表示起始地址为0，程序入口为_start
 # 
-# 设置DS为0x07c0，设置ES为0x9000
-# 将SI和DI清零
-# movsw将DS:SI地址处的数据拷贝到ES:DI处，SI和DI会自动递增，拷贝的次数存放在CX寄存器中
-# 因此下面的代码意思是，
-# 将0x7c00的数据拷贝至0x90000(576K)处, 每次拷贝2个字节，共拷贝256次，512个字节
+# 
+# 下面的代码将0x7c00的数据拷贝至0x90000(576K)处, 每次拷贝2个字节，共拷贝256次，512个字节
 # 也就是将bootsect从0x07c00拷贝到0x90000(576K)处
+# 为什么是576KB处，这是因为在后面会将kernel拷贝到0x10000(64KB)处，
+# Linus在写这个版本的kernel时，假设最大为512KB，64KB+512KB=576KB
+# 之所以将kernel拷贝到64KB处，我猜想应该是因为保护BIOS的代码不被覆盖，因为后面还要用到BIOS掉用
+#
 #
 _start:
 	mov	$BOOTSEG, %ax				# BOOTSEG 0x07c0
@@ -106,9 +107,10 @@ _start:
 	rep								# execute repeat util CX == 0, total 512 bytes
 	movsw							# copy 2Bytes from DS:SI(0x07c00) to ES:DI(0x90000) 512 bytes
 
+# 
 # 跳转至$INITSEC:go处运行，INITSEG定义为0x9000
 # 因此也就是跳转至下面的标号“go”的地方开始运行，这条语句会将CS设置为INITSEG
-#
+# 
 #	
 	ljmp $INITSEG, $go				# jump 0x9000:go
 go:	mov	%cs, %ax					# CS = 0x9000
@@ -117,8 +119,10 @@ go:	mov	%cs, %ax					# CS = 0x9000
 	mov	%ax, %ss					# SS = 0x9000, put stack top at 0x9ff00
 #
 # 此处设置栈顶地址为0x9ff00
-# 因为bootsec占用512字节，setup占用512*4个字节，从0x90000开始存放bootsect和setup，末尾地址为0x90a00
-# 而x86的栈为FD栈，满减栈，因此从0x90a00到0x9ff00的空间都是可以用，栈顶指针初始值为0x9ff00
+# 因为bootsec占用512字节，setup占用512*4个字节，
+# 从0x90000开始存放bootsect和setup，末尾地址为0x90a00
+# 而x86的栈为FD栈，满减栈，因此从0x90a00到0x9ff00的空间都是可以用，
+# 栈顶指针初始值为0x9ff00
 #
 	mov	$0xff00, %sp				# x86 FD stack [full decrease stack]
 	                                # we will copy 4 sectors(2048) form boot device
@@ -149,18 +153,20 @@ load_setup:
 ok_load_setup:
 
 # Get disk drive parameters, specifically nr of sectors/track
+# 通过BIOS掉用获取磁盘驱动器的参数，特别是每一个磁道扇区的数量
+# 可以产看BIOS掉用手册，这里就是获取软盘每个磁道的扇区数量，为后面读取system做准备
 
 	mov	$0x00, %dl
 	mov	$0x0800, %ax				# AH=8 is get drive parameters
 	int	$0x13
 	mov	$0x00, %ch
-	#seg cs
 	mov	%cx, %cs:sectors+0			# %cs means sectors is in %cs
 	mov	$INITSEG, %ax
 	mov	%ax, %es					# restore ES
 #
-# 使用系统调用打印：Loading system ...
+# 使用BIOS调用打印：Loading system ...
 # Print some inane message
+#
 	mov	$0x03, %ah					# read cursor pos
 	xor	%bh, %bh
 	int	$0x10
@@ -171,7 +177,8 @@ ok_load_setup:
 	mov	$0x1301, %ax				# write string, move cursor
 	int	$0x10
 
-# 读取SYS模块，存放在地址0x10000（64K）开始的地方，
+# 
+# 读取system模块，存放在地址0x10000（64K）开始的地方，
 # 根据前面的SYSSIZE定义我们知道一共读取0x3000*16个字节也就是192KB的内容
 # 对于我们来说已经够了，我们可以计算出当前的最大地址为64 + 192 = 256KB，
 # 不能覆盖到bootsect和setup模块的起始地址
@@ -180,19 +187,27 @@ ok_load_setup:
 
 	mov	$SYSSEG, %ax				# AX = 0x1000
 	mov	%ax, %es					# ES = 0x1000 segment of 0x010000
-	call read_it
-	call kill_motor
+	call read_it					# 读system模块到0x10000地址处，就不分析，知道就可以
+	call kill_motor					# 读完后关闭电机
 
 # After that we check which root-device to use. If the device is
 # defined (#= 0), nothing is done and the given device is used.
 # Otherwise, either /dev/PS0 (2,28) or /dev/at0 (2,8), depending
 # on the number of sectors that the BIOS reports currently.
 
-	#seg cs
+#
+# 获取root_dev处的设备号，如果不是0，则跳到root_defined处
+# 如果是0，则进行检测
+# 取上面获取到的sectors参数，
+# 如果是15，则将ax设置为0x208表示1.2M的软盘
+# 如果是18，则将ax设置为0x21c表示1.44M的软盘
+# 否则就进行undef_root死循环
+# 这里我们进行了定义，因此探寻过程走不到，
+# 而且我们还可以知道root_dev最终存放在ax中，不知道有啥用
+#
 	mov	%cs:root_dev+0, %ax
 	cmp	$0, %ax
 	jne	root_defined
-	#seg cs
 	mov	%cs:sectors+0, %bx
 	mov	$0x0208, %ax				# /dev/ps0 - 1.2Mb
 	cmp	$15, %bx
@@ -203,7 +218,6 @@ ok_load_setup:
 undef_root:
 	jmp undef_root
 root_defined:
-	#seg cs
 	mov	%ax, %cs:root_dev+0
 # 
 # 当所有的模块都加载完成后，跳转到0x09200地址处运行，我们知道此处是setup的地址
@@ -218,6 +232,7 @@ root_defined:
 # after that (everyting loaded), we jump to
 # the setup-routine loaded directly after
 # the bootblock:
+#
 
 	ljmp $SETUPSEG, $0				# setup code
 
@@ -232,10 +247,10 @@ head:	.word 0						# current head
 track:	.word 0						# current track
 
 read_it:
-	mov	%es, %ax					# AX = 0x1000
-	test $0x0fff, %ax				# ES must be 64KB boundary
+	mov	%es, %ax					# AX = 0x1000，AX为目的的段地址
+	test $0x0fff, %ax				# ES must be 64KB boundary，测试是不是64KB对齐
 die:	
-	jne die							# es must be at 64kB boundary
+	jne die							# es must be at 64kB boundary，如果不是则进入die死循环
 	xor %bx, %bx					# bx is starting address within segment
 rp_read:
 	mov %es, %ax

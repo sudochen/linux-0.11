@@ -17,9 +17,9 @@
 
 # NOTE! These had better be the same as in bootsect.s!
 
-	.equ INITSEG, 0x9000	# we move boot here - out of the way
-	.equ SYSSEG, 0x1000		# system loaded at 0x10000 (65536).
-	.equ SETUPSEG, 0x9020	# this is the current segment
+	.equ INITSEG, 	0x9000		# we move boot here - out of the way
+	.equ SYSSEG, 	0x1000		# system loaded at 0x10000 (65536).
+	.equ SETUPSEG, 	0x9020		# this is the current segment
 
 	.global _start, begtext, begdata, begbss, endtext, enddata, endbss
 	.text
@@ -122,7 +122,7 @@ no_disk1:
 is_disk1:
 
 # now we want to move to protected mode ...
-# 现在，我们要进入保护模式，先关掉终端
+# 现在，我们要进入保护模式，先关掉中断
 
 	cli							# no interrupts allowed ! 
 
@@ -134,7 +134,7 @@ is_disk1:
 	mov	$0x0000, %ax
 	cld							# 'direction'=0, movs moves forward
 do_move:
-	mov	%ax, %es				# destination segment
+	mov	%ax, %es				# destination segment，目的段地址
 	add	$0x1000, %ax
 	cmp	$0x9000, %ax
 	jz	end_move
@@ -157,6 +157,7 @@ end_move:
 	lgdt gdt_48					# load gdt with whatever appropriate
 
 # that was painless, now we enable A20
+# A20地址相关，暂时不关注
 
 	#call	empty_8042			# 8042 is the keyboard controller
 	#mov	$0xD1, %al			# command write
@@ -215,6 +216,7 @@ end_move:
 # we let the gnu-compiled 32-bit programs do that. We just jump to
 # absolute address 0x00000, in 32-bit protected mode.
 # 启用32位保护模式，寻址方式发生变化
+#
 
 	mov	$0x0001, %ax			# protected mode (PE) bit
 	lmsw %ax					# This is it!
@@ -228,6 +230,7 @@ end_move:
 # $8的二进制为00001000,根据以上可以看出是全局描述符（1），最高权限（00），索引为1
 #
 # 根据后面的全局描述符表gdt可以知道，此处是代码段，基地址为0，也是Image模块的Head的地址
+# 也就是跳到0地址出开始运行
 #
 	ljmp $8, $0					# jmp offset 0 of code segment 0 in gdt
 
@@ -263,10 +266,6 @@ idt_48:
 #
 # 0x800表示限制大小在0x800
 # 512+gdt可表示0x200+gdt，表示setup模块所在的的地址+gdt偏移，也就是gdt存放数据信息
-# LGDT, LIDT指令后面根据地址是线性地址，这两个指令是仅有的能够加载线性地址的指令
-# 也就是说不管段寄存器是什么值，都看作0，这两个指令通过在实模式中使用
-# 以便于处理器在切换到保护模式之前进行初始化
-#
 #
 gdt_48:
 	.word	0x800				# gdt limit=2048, 256 GDT entries
