@@ -422,6 +422,11 @@ void sched_init(void)
 	printk("init_task use GTD %d for TSS\n", FIRST_TSS_ENTRY);
 	printk("init_task use GTD %d for LDT\n", FIRST_LDT_ENTRY);
 	
+#ifndef CONFIG_TASK_TSS
+	printk("switch by kernel stack\n");
+#else
+	printk("switch by TSS\n");
+#endif
 /*******************************************************************************
 	此时p为gdt的第6项，也就是说从第六项开始清理gdt为0，每次清理两项
 	p = gdt + 2 + FIRST_TSS_ENTRY

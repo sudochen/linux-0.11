@@ -121,28 +121,25 @@ int copy_process(int nr,long ebp,long edi,long esi,long gs,long none,
 
 #ifndef CONFIG_TASK_TSS
 	stack_top = (long *)(PAGE_SIZE + (long)p);
-
-	*(--stack_top) = ss & 0xffff;
-	*(--stack_top) = esp;
-	*(--stack_top) = eflags;
-	*(--stack_top) = cs & 0xffff;
-	*(--stack_top) = eip;
-
-	*(--stack_top) = ds & 0xffff; 
-	*(--stack_top) = es & 0xffff; 
-	*(--stack_top) = fs & 0xffff; 
-	*(--stack_top) = gs & 0xffff;
-	*(--stack_top) = esi; 
-	*(--stack_top) = edi; 
-	*(--stack_top) = edx;
-	*(--stack_top) = (long)first_return_from_kernel;
-	*(--stack_top) = ebp;
-	*(--stack_top) = ecx;
-	*(--stack_top) = ebx;
-	*(--stack_top) = 0;
-	
-	p->stack_top = (long)stack_top;
-	
+    *(--stack_top) = ss & 0xffff;
+    *(--stack_top) = esp;
+    *(--stack_top) = eflags;
+    *(--stack_top) = cs & 0xffff;
+    *(--stack_top) = eip;
+    *(--stack_top) = (long)first_return_from_kernel;
+    *(--stack_top) = ebp;
+    *(--stack_top) = edx;
+    *(--stack_top) = ecx;
+    *(--stack_top) = ebx;
+    *(--stack_top) = 0;
+    *(--stack_top) = edi;
+    *(--stack_top) = esi;
+    *(--stack_top) = eflags;
+    *(--stack_top) = gs & 0xffff;
+    *(--stack_top) = fs & 0xffff; 
+    *(--stack_top) = es & 0xffff; 
+    *(--stack_top) = ds & 0xffff; 
+    p->stack_top = (long)stack_top;
 #else
 
 	p->tss.back_link = 0;

@@ -23,6 +23,7 @@ pg_dir:
  * 根据setup模块我们安装了两个段描述符，分别是代码段和数据段，共8MB的空间
  * 0x10的二进制为10000, 我们可以看出DPL为0，T为0表示此描述符在全局描述符中的第二个描述符，权限为0最高权限
  * 设置数据段为0x10，全局描述第2个段
+ * 也就是设置数据段
  */
 startup_32:
 	movl $0x10,%eax
@@ -45,18 +46,19 @@ startup_32:
 	 *
 	 */
 	lss stack_start,%esp
-	call setup_idt
-	call setup_gdt
+	call setup_idt			# 设置所有的中断描述符为ignore
+	call setup_gdt			# 重新加载
 
 	/*
 	 * 重新设置数据段，因为在上面的程序中修改gdt，因此需要重新加载，
+	 * 只所有重新加载是为了刷新段描述符告诉缓存，使其生效
 	 */
 	movl $0x10,%eax		    # reload all the segment registers
 	mov %ax,%ds		        # after changing gdt. CS was already
 	mov %ax,%es		        # reloaded in 'setup_gdt'
 	mov %ax,%fs
 	mov %ax,%gs
-	lss stack_start,%esp
+	lss stack_start,%esp	# 和上面的一样，重新设置堆栈
 	/*
 	 * xorl为异或运算，相同为0，不同为1，此处的意思是清零寄存器
 	 */
@@ -66,7 +68,7 @@ startup_32:
 	cmpl %eax,0x100000
 	je 1b
 
-/*
+/* 设置486相关CPU
  * NOTE! 486 should set bit 16, to check for write-protect in supervisor
  * mode. Then it would be unnecessary with the "verify_area()"-calls.
  * 486 users probably want to set the NE (#5) bit also, so as to use
@@ -78,6 +80,10 @@ startup_32:
 	orl $2,%eax		        # set MP
 	movl %eax,%cr0
 	call check_x87
+	/*
+	 * 这个是比较重要的函数，到目前为止，我们都没有开启页部件
+	 *
+	 */
 	jmp after_page_tables
 
 /*
