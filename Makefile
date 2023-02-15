@@ -5,6 +5,7 @@ LDFLAGS	+= -Ttext 0 -e startup_32
 CFLAGS	+= -Iinclude -Wall
 CPP	+= -Iinclude
 
+
 #
 # ROOT_DEV specifies the default root-device when making the image.
 # This can be either FLOPPY, /dev/xxxx or empty, in which case the
