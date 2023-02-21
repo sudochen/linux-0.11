@@ -10,7 +10,7 @@ DRIVERS =kernel/blk_drv/blk_drv.a kernel/chr_drv/chr_drv.a
 MATH	=kernel/math/math.a
 LIBS	=lib/lib.a
 
-all: Image
+all: clean Image
 Image: boot/bootsect boot/setup kernel.bin FORCE
 	$(BUILD) boot/bootsect boot/setup kernel.bin rootfs/rootram.img Image
 	$(Q)sync
@@ -91,8 +91,10 @@ help::
 	$(Q)echo ""
 	$(Q)echo "Default use Serial for stdin stdout stderr"
 	$(Q)echo "Default use Kernel stack for task switch"
+	$(Q)echo "Default use hard disk for rootfs"
 	$(Q)echo "Use [make VGA=1 ] to use VGA for stdio stdout stderr"
 	$(Q)echo "Use [make TSS=1 ] to use TSS for task switch"
+	$(Q)echo "Use [make FLOPPY=1 ] to use floppy for rootfs"
 	$(Q)echo "Use [make qemu  ] to use qemu serial"
 	$(Q)echo "Use [make bochs ] to use bochs VGA"
 	$(Q)echo "Use [make qemu-x] to use qemu VGA"

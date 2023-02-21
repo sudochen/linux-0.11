@@ -76,8 +76,11 @@
 
 # ROOT_DEV:	0x000 - same type of floppy as boot.
 #		0x301 - first partition on first drive etc
-	.equ ROOT_DEV, 0x301
+#       0x21C for RAMDISK
 #	.equ ROOT_DEV, 0x21D
+	.equ ROOT_DEV, 0x301
+#	.equ ROOT_DEV. 0x21C
+#
 #
 # the code will be copy to 0x7c00 and running
 #
