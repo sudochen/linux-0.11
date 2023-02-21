@@ -36,8 +36,8 @@ inb_p(0x71); \
 
 static void recal_intr(void);
 
-static int recalibrate = 0;
-static int reset = 0;
+static int recalibrate = 1;
+static int reset = 1;
 
 /*
  *  This struct defines the HD's and their types.
