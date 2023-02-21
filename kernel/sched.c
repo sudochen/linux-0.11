@@ -143,10 +143,10 @@ void schedule(void)
 				(*p)->counter = ((*p)->counter >> 1) +
 						(*p)->priority;
 	}
-#ifndef CONFIG_TASK_TSS
-	switch_to_by_stack((long)pnext, (long)(_LDT(next)));
-#else
+#ifdef CONFIG_SWITCH_TSS
 	switch_to(next);
+#else
+	switch_to_by_stack((long)pnext, (long)(_LDT(next)));
 #endif
 }
 
@@ -422,10 +422,10 @@ void sched_init(void)
 	printk("init_task use GTD %d for TSS\n", FIRST_TSS_ENTRY);
 	printk("init_task use GTD %d for LDT\n", FIRST_LDT_ENTRY);
 	
-#ifndef CONFIG_TASK_TSS
-	printk("switch by kernel stack\n");
-#else
+#ifdef CONFIG_SWITCH_TSS
 	printk("switch by TSS\n");
+#else
+	printk("switch by kernel stack\n");
 #endif
 /*******************************************************************************
 	此时p为gdt的第6项，也就是说从第六项开始清理gdt为0，每次清理两项

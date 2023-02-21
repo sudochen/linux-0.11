@@ -2,29 +2,17 @@
 include Makefile.head
 
 LDFLAGS	+= -Ttext 0 -e startup_32
-CFLAGS	+= -Iinclude -Wall
+CFLAGS	+= -Iinclude -Wall -g
 CPP	+= -Iinclude
-
-
-#
-# ROOT_DEV specifies the default root-device when making the image.
-# This can be either FLOPPY, /dev/xxxx or empty, in which case the
-# default of hd1(0301) is used by 'build'.
-#
-# ROOT_DEV= 0301	# hd1
-# ROOT_DEV= 021d	# FLOPPY B
-
-ROOT_DEV= 021d	# FLOPPY B
 
 ARCHIVES=kernel/kernel.o mm/mm.o fs/fs.o
 DRIVERS =kernel/blk_drv/blk_drv.a kernel/chr_drv/chr_drv.a
 MATH	=kernel/math/math.a
 LIBS	=lib/lib.a
 
-all: clean Image
+all: Image
 Image: boot/bootsect boot/setup kernel.bin FORCE
-	$(BUILD) boot/bootsect boot/setup kernel.bin Image
-	$(Q)rm -f kernel.bin
+	$(BUILD) boot/bootsect boot/setup kernel.bin rootfs/rootram.img Image
 	$(Q)sync
 
 init/main.o: FORCE
@@ -83,9 +71,13 @@ clean:
 
 run: qemu
 
-QEMU_OPS:= -nographic -serial mon:stdio -m 64M -boot a
+QEMU_OPS_T := -nographic -serial mon:stdio -m 64M -boot a
 qemu:
-	qemu-system-i386 ${QEMU_OPS} -fda Image  -hda ./rootfs/hdc-0.11.img 
+	qemu-system-i386 ${QEMU_OPS_T} -fda Image -fdb ./rootfs/rootimage-0.11.img -hda ./rootfs/hdc-0.11.img 
+
+QEMU_OPS_X := -m 64M -boot a
+qemu-x:
+	qemu-system-i386 ${QEMU_OPS_X} -fda Image -fdb ./rootfs/rootimage-0.11.img -hda ./rootfs/hdc-0.11.img 
 
 bochs:
 	bochs -f bochsrc
@@ -95,4 +87,15 @@ distclean: clean
 
 FORCE: ;
 
+help::
+	$(Q)echo ""
+	$(Q)echo "Default use Serial for stdin stdout stderr"
+	$(Q)echo "Default use Kernel stack for task switch"
+	$(Q)echo "Use [make VGA=1 ] to use VGA for stdio stdout stderr"
+	$(Q)echo "Use [make TSS=1 ] to use TSS for task switch"
+	$(Q)echo "Use [make qemu  ] to use qemu serial"
+	$(Q)echo "Use [make bochs ] to use bochs VGA"
+	$(Q)echo "Use [make qemu-x] to use qemu VGA"
+	$(Q)echo ""
+	
 .PHONE: Image kernel.elf kernel.bin

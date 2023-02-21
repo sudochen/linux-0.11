@@ -18,6 +18,7 @@ export V Q S
 #
 
 RAMDISK_START ?= 256
+RAMDISK_SIZE ?= 2048
 
 %.o: %.c
 	$(Q)$(CC) $(CFLAGS) -c -o $*.o $<
@@ -58,4 +59,14 @@ ifeq ($(OS), Darwin)
   AR      = i386-elf-ar
   STRIP   = i386-elf-strip
   OBJCOPY = i386-elf-objcopy
+endif
+
+ifeq (${VGA}, 1)
+CFLAGS	+= -DCONFIG_VGA
+CPP	+= -DCONFIG_VGA
+endif
+
+ifeq (${TSS}, 1)
+CFLAGS	+= -DCONFIG_SWITCH_TSS
+CPP	+= -DCONFIG_SWITCH_TSS
 endif

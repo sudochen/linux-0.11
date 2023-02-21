@@ -7,7 +7,8 @@
 bootsect=$1
 setup=$2
 kernel=$3
-image=$4
+ramdisk=$4
+image=$5
 
 # Write bootsect (512 bytes, 1 sector)
 [ ! -f "$bootsect" ] && echo "Error: No bootsect binary file there" && exit -1
@@ -21,4 +22,7 @@ dd if=$setup seek=1 bs=512 count=4 of=$image >/dev/null 2>&1
 [ ! -f "$kernel" ] && echo "Error: No kernel binary file there" && exit -1
 dd if=$kernel seek=5 bs=512 of=$image >/dev/null 2>&1
 
+# Write ramdisk
+[ ! -f "$ramdisk" ] && echo "Error: No ramdisk binary file there" && exit -1
+dd if=$ramdisk seek=$RAMDISK_START bs=1024 of=$image >/dev/null 2>&1
 

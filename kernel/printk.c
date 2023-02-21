@@ -45,7 +45,11 @@ int printk(const char *fmt, ...)
 		"pop %%fs\n\t"
 		"pushl %0\n\t"
 		"pushl $buf\n\t"
+#ifdef CONFIG_VGA
+		"pushl $0\n\t"
+#else
 		"pushl $1\n\t"
+#endif
 		"call tty_write\n\t"
 		"addl $8,%%esp\n\t"
 		"popl %0\n\t"
